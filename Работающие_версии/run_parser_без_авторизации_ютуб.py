@@ -2,6 +2,7 @@ import os
 import re
 import time
 import random
+import string
 import pandas as pd
 from selenium import webdriver
 from selenium.webdriver.chrome.options import Options
@@ -15,39 +16,32 @@ import plyer
 from datetime import datetime
 import argparse
 import sys
-import glob
 
 class SocialMediaParser:
-    def __init__(self, date_range):
+    def __init__(self, links_file, date_range):
         self.project_root = os.path.dirname(os.path.abspath(__file__))  # Корневая папка проекта
-        self.source_dir = os.path.join(self.project_root, "source")    # Папка для исходного файла
         self.profile_dir = os.path.join(self.project_root, "profile")  # Папка для профиля
         self.driver_dir = os.path.join(self.project_root, "driver")    # Папка для драйвера
         self.results_dir = os.path.join(self.project_root, "results")  # Папка для результатов
+        self.links_file = links_file
         self.date_range = date_range  # Фиксированный диапазон дат
         self.driver = None
         self.data = []  # Список кортежей (link, numbers, labels)
         self.links = []
-        self.supported_platforms = ['vk.com', 'facebook.com', 'instagram.com', 't.me', 'youtube.com', 'ok.ru']
 
     def setup_driver(self):
-        """Настройка драйвера Chrome и профиля в портативном режиме с улучшенной маскировкой"""
+        """Настройка драйвера Chrome и профиля в портативном режиме"""
         # Создание папок, если их нет
         os.makedirs(self.profile_dir, exist_ok=True)
         os.makedirs(self.driver_dir, exist_ok=True)
         os.makedirs(self.results_dir, exist_ok=True)
-        os.makedirs(self.source_dir, exist_ok=True)
 
-        # Настройка опций Chrome для маскировки
+        # Настройка опций Chrome
         options = Options()
         options.add_argument(f"user-data-dir={self.profile_dir}")  # Используем локальный профиль
         options.add_argument("start-maximized")
-        options.add_argument("--disable-blink-features=AutomationControlled")
         options.add_experimental_option("excludeSwitches", ["enable-automation"])
         options.add_experimental_option('useAutomationExtension', False)
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
-        options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36")
 
         # Установка пути для сохранения ChromeDriver
         driver_path = os.path.join(self.driver_dir, "chromedriver.exe")
@@ -70,31 +64,12 @@ class SocialMediaParser:
         input("Нажмите Enter, чтобы продолжить...")
 
     def load_input_data(self):
-        """Загрузка ссылок из Excel-файла в папке source"""
+        """Загрузка ссылок из текстового файла"""
         try:
-            # Ищем любой .xlsx файл в папке source
-            excel_files = glob.glob(os.path.join(self.source_dir, "*.xlsx"))
-            if not excel_files:
-                raise FileNotFoundError("В папке source не найден файл .xlsx")
-            if len(excel_files) > 1:
-                print(f"Найдено несколько .xlsx файлов в папке source: {excel_files}")
-                print(f"Будет использован первый файл: {excel_files[0]}")
-
-            # Читаем первый найденный файл
-            self.original_df = pd.read_excel(excel_files[0])
-            if 'Ссылка' not in self.original_df.columns:
-                raise ValueError("В файле отсутствует столбец 'Ссылка'")
-
-            # Сохраняем все ссылки, но парсим только поддерживаемые
-            self.all_links = self.original_df['Ссылка'].tolist()
-            self.links = []
-            for link in self.all_links:
-                if any(platform in str(link) for platform in self.supported_platforms):
-                    self.links.append(link)
-
+            with open(self.links_file, 'r', encoding='utf-8') as file:
+                self.links = [line.strip() for line in file.readlines() if line.strip()]
             if not self.links:
-                print("Не найдено ссылок для поддерживаемых платформ (VK, Facebook, Instagram, Telegram, YouTube, Одноклассники). Все ссылки будут перенесены в выходной файл без изменений.")
-
+                raise ValueError("Файл ссылок пустой или содержит ошибки")
         except Exception as e:
             print(f"Ошибка загрузки входного файла: {e}")
             sys.exit(1)
@@ -138,7 +113,7 @@ class SocialMediaParser:
                 if not numbers or not labels:
                     self.data.append((link, ['0'], ['Нет данных']))
                 else:
-                    # Синхронизируем числа и метки
+                    # Синхронизируем числа и метки (если меток больше, чем чисел, оставляем лишние метки как None)
                     min_length = min(len(numbers), len(labels))
                     numbers = numbers[:min_length]
                     labels = labels[:min_length]
@@ -157,13 +132,13 @@ class SocialMediaParser:
             print(f"Обработана страница {link}. Осталось: {remaining} ссылок.")
 
     def clean_data(self):
-        """Очистка и форматирование извлечённых данных"""
+        """Очистка и форматирование извлечённых данных с правильной разбивкой по столбцам"""
         data = []
         all_labels = set()  # Собираем все уникальные метки
 
         # Собираем данные и метки
         for link, numbers, labels in self.data:
-            row_data = {'Ссылка': link}
+            row_data = {'link': link, 'date': self.date_range}
             if labels[0] != 'Нет данных':
                 for num, label in zip(numbers, labels):
                     row_data[label] = num
@@ -172,28 +147,39 @@ class SocialMediaParser:
                 row_data['Нет данных'] = numbers[0] if numbers else '0'
             data.append(row_data)
 
-        # Создаём DataFrame с динамическими столбцами для спарсенных данных
-        parsed_df = pd.DataFrame(data)
+        # Создаём DataFrame с динамическими столбцами
+        df = pd.DataFrame(data)
 
-        # Приводим структуру к исходному файлу
-        result_df = self.original_df.copy()
+        # Убедимся, что все возможные метки присутствуют как столбцы
+        for label in all_labels:
+            if label not in df.columns:
+                df[label] = 0
 
-        # Обновляем значения только для спарсенных ссылок
-        for metric in ['Подписчики', 'Лайки', 'Репосты', 'Комментарии', 'Просмотры', 'Публикации']:
-            if metric in parsed_df.columns:
-                # Создаём словарь для быстрого поиска
-                metric_dict = parsed_df.set_index('Ссылка')[metric].to_dict()
-                result_df[metric] = result_df['Ссылка'].map(metric_dict).fillna(result_df[metric])
-            else:
-                # Если метрика отсутствует, проставляем 0 для спарсенных ссылок
-                parsed_links = parsed_df['Ссылка'].tolist()
-                result_df.loc[result_df['Ссылка'].isin(parsed_links), metric] = 0
+        # Заполняем пропуски нулями
+        df = df.fillna(0)
 
-        return result_df
+        # Перемещаем столбцы 'link' и 'date' в начало
+        cols = ['link', 'date'] + [col for col in df.columns if col not in ['link', 'date']]
+        df = df[cols]
+
+        return df
 
     def save_results(self, df):
-        """Сохранение результатов в Excel"""
-        output_path = os.path.join(self.results_dir, "results.xlsx")
+        """Сохранение результатов в Excel с датой и временем в формате ДД.ММ.ГГГГ ЧЧ.ММ"""
+        # Определение платформы
+        platform = 'unknown'
+        if any('vk.com' in link for link in df['link']):
+            platform = 'vk'
+        elif any('instagram' in link for link in df['link']):
+            platform = 'instagram'
+        elif any('t.me' in link for link in df['link']):
+            platform = 'telegram'
+
+        # Формирование имени файла с рандомными числами и датой/временем в формате ДД.ММ.ГГГГ ЧЧ.ММ
+        random_num = str(random.randint(1, 1000))
+        timestamp = datetime.now().strftime("%d.%m.%Y %H.%M")
+        filename = f"{platform}_{timestamp}.xlsx"
+        output_path = os.path.join(self.results_dir, filename)
 
         with pd.ExcelWriter(output_path, engine='xlsxwriter') as writer:
             df.to_excel(writer, sheet_name='pars', index=False)
@@ -221,12 +207,13 @@ class SocialMediaParser:
 
 def main():
     parser = argparse.ArgumentParser(description='Парсер данных социальных сетей в портативном режиме с фиксированным диапазоном дат')
+    parser.add_argument('--links', default='links.txt', help='Путь к файлу со ссылками')
     parser.add_argument('--date', default='01.02.2025-28.02.2025', help='Фиксированный диапазон дат (формат ДД.ММ.ГГГГ-ДД.ММ.ГГГГ)')
 
     args = parser.parse_args()
 
     try:
-        parser_instance = SocialMediaParser(args.date)
+        parser_instance = SocialMediaParser(args.links, args.date)
         parser_instance.run()
     except Exception as e:
         print(f"Произошла ошибка: {e}")
