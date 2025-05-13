@@ -22,29 +22,36 @@ class SocialMediaParser:
         self.profile_dir = os.path.join(self.project_root, "profile")  # Папка для профиля
         self.driver_dir = os.path.join(self.project_root, "driver")    # Папка для драйвера
         self.results_dir = os.path.join(self.project_root, "results")  # Папка для результатов
-        self.dates_file = os.path.join(self.project_root, "dates.txt") # Файл с диапазоном дат
-        self.date_range = self.load_date_range()  # Загружаем диапазон дат
+        self.dates_file = os.path.join(self.project_root, "dates.txt") # Файл с диапазонами дат
+        self.date_ranges = self.load_date_ranges()  # Загружаем диапазоны дат
         self.driver = None
-        self.data = []  # Список кортежей (link, numbers, labels)
+        self.data = []  # Список кортежей (link, numbers, labels, date_range)
         self.links = []
-        self.supported_platforms = ['VK', 'Facebook', 'Instagram', 'Telegram', 'Youtube', 'OK']  # Добавлен OK
+        self.supported_platforms = ['VK', 'Facebook', 'Instagram', 'Telegram', 'Youtube', 'OK']  # Поддерживаемые платформы
 
-    def load_date_range(self):
-        """Загрузка диапазона дат из файла dates.txt"""
+    def load_date_ranges(self):
+        """Загрузка диапазонов дат из файла dates.txt в формате ДД.ММ.ГГГГ - ДД.ММ.ГГГГ"""
         try:
             if not os.path.exists(self.dates_file):
                 raise FileNotFoundError("Файл dates.txt не найден в корневой директории проекта")
             
             with open(self.dates_file, 'r', encoding='utf-8') as file:
-                date_range = file.read().strip()
+                date_lines = file.read().strip().splitlines()
             
-            # Проверка формата диапазона дат
-            if not re.match(r'\d{2}\.\d{2}\.\d{4}-\d{2}\.\d{2}\.\d{4}', date_range):
-                raise ValueError("Неверный формат диапазона дат в dates.txt. Ожидается формат: ДД.ММ.ГГГГ-ДД.ММ.ГГГГ")
+            date_ranges = []
+            for date_range in date_lines:
+                date_range = date_range.strip()
+                # Проверка базового формата с пробелами вокруг тире
+                if not re.match(r'^\d{2}\.\d{2}\.\d{4}\s+-\s+\d{2}\.\d{2}\.\d{4}$', date_range):
+                    raise ValueError(f"Неверный формат диапазона дат: {date_range}. Ожидается ДД.ММ.ГГГГ - ДД.ММ.ГГГГ с пробелами вокруг тире")
+                date_ranges.append(date_range)
             
-            return date_range
+            if not date_ranges:
+                raise ValueError("В dates.txt не указаны корректные диапазоны дат.")
+            
+            return date_ranges
         except Exception as e:
-            print(f"Ошибка загрузки диапазона дат из dates.txt: {e}")
+            print(f"Ошибка загрузки диапазонов дат из dates.txt: {e}")
             sys.exit(1)
 
     def setup_driver(self):
@@ -131,80 +138,84 @@ class SocialMediaParser:
             print(f"Ошибка загрузки входного файла: {e}")
             sys.exit(1)
 
-    def parser(self, link):
+    def parser(self, link, date_range):
         """Парсинг одной ссылки с фиксированным диапазоном дат"""
         try:
-            print(f"Ссылка: {link} | Элемент: Обновление страницы | Результат: Начало обработки")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: Обновление страницы | Результат: Начало обработки")
             self.driver.refresh()
             time.sleep(2)
 
             # Ввод ссылки
-            print(f"Ссылка: {link} | Элемент: textarea (поле ввода ссылки) | Результат: Поиск элемента")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: textarea (поле ввода ссылки) | Результат: Поиск элемента")
             input_tab = self.driver.find_element(By.TAG_NAME, 'textarea')
-            print(f"Ссылка: {link} | Элемент: textarea (поле ввода ссылки) | Результат: Элемент найден, ввод ссылки")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: textarea (поле ввода ссылки) | Результат: Элемент найден, ввод ссылки")
             input_tab.send_keys(link)
             time.sleep(2)
 
             # Нажатие на поиск
-            print(f"Ссылка: {link} | Элемент: button (кнопка поиска) | Результат: Поиск элемента")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: button (кнопка поиска) | Результат: Поиск элемента")
             self.driver.find_element(By.TAG_NAME, 'button').click()
-            print(f"Ссылка: {link} | Элемент: button (кнопка поиска) | Результат: Кнопка нажата, ожидание datepicker")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: button (кнопка поиска) | Результат: Кнопка нажата, ожидание datepicker")
             WebDriverWait(self.driver, 20).until(ec.presence_of_element_located(('id', 'datepicker')))
-            print(f"Ссылка: {link} | Элемент: id=datepicker (поле даты) | Результат: Элемент найден")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: id=datepicker (поле даты) | Результат: Элемент найден")
             
-            # Установка фиксированного диапазона дат
-            print(f"Ссылка: {link} | Элемент: id=datepicker (поле даты) | Результат: Очистка поля")
+            # Установка фиксированного диапазона дат в формате с пробелами
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: id=datepicker (поле даты) | Результат: Очистка поля")
             date_input = self.driver.find_element('id', 'datepicker')
             date_input.clear()
-            print(f"Ссылка: {link} | Элемент: id=datepicker (поле даты) | Результат: Ввод диапазона дат: {self.date_range}")
-            date_input.send_keys(self.date_range)
-            print(f"Ссылка: {link} | Элемент: xpath=//button[@class='app-button r-button'] (кнопка применения даты) | Результат: Поиск элемента")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: id=datepicker (поле даты) | Результат: Ввод диапазона дат: {date_range}")
+            date_input.send_keys(date_range)
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: xpath=//button[@class='app-button r-button'] (кнопка применения даты) | Результат: Поиск элемента")
             self.driver.find_element('xpath', '//button[@class="app-button r-button"]').click()
-            print(f"Ссылка: {link} | Элемент: xpath=//button[@class='app-button r-button'] (кнопка применения даты) | Результат: Кнопка нажата, ожидание загрузки данных")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: xpath=//button[@class='app-button r-button'] (кнопка применения даты) | Результат: Кнопка нажата, ожидание загрузки данных")
             WebDriverWait(self.driver, 600).until(ec.presence_of_element_located(('xpath', '//label[@for="v2"]')))
-            print(f"Ссылка: {link} | Элемент: xpath=//label[@for='v2'] (кнопка 'Общие') | Результат: Элемент найден")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: xpath=//label[@for='v2'] (кнопка 'Общие') | Результат: Элемент найден")
 
             # Нажатие на кнопку "Общие"
-            print(f"Ссылка: {link} | Элемент: xpath=//label[@for='v2'] (кнопка 'Общие') | Результат: Нажатие на кнопку")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: xpath=//label[@for='v2'] (кнопка 'Общие') | Результат: Нажатие на кнопку")
             self.driver.find_element('xpath', '//label[@for="v2"]').click()
             time.sleep(2)
 
             # Извлечение данных
-            print(f"Ссылка: {link} | Элемент: HTML-страница (извлечение данных) | Результат: Парсинг страницы")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: HTML-страница (извлечение данных) | Результат: Парсинг страницы")
             soup = bs(self.driver.page_source, 'html.parser')
-            print(f"Ссылка: {link} | Элемент: ul.common-data (статистика) | Результат: Поиск элементов")
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: ul.common-data (статистика) | Результат: Поиск элементов")
             stat_links = soup.find_all('ul', class_='common-data')
             
             if not stat_links:
-                print(f"Ссылка: {link} | Элемент: ul.common-data (статистика) | Результат: Элементы не найдены, возвращаем 'Нет данных'")
-                self.data.append((link, ['0'], ['Нет данных']))
+                print(f"Ссылка: {link} | Дата: {date_range} | Элемент: ul.common-data (статистика) | Результат: Элементы не найдены, возвращаем 'Нет данных'")
+                self.data.append((link, ['0'], ['Нет данных'], date_range))
             else:
-                print(f"Ссылка: {link} | Элемент: ul.common-data (статистика) | Результат: Элементы найдены, извлечение текста")
+                print(f"Ссылка: {link} | Дата: {date_range} | Элемент: ul.common-data (статистика) | Результат: Элементы найдены, извлечение текста")
                 text = stat_links[0].text.replace(" ", "")  # Берем первый ul с классом common-data
                 numbers = re.findall(r'\d+', text)
                 labels = re.findall(r'[А-Яа-я]+', text)
                 if not numbers or not labels:
-                    print(f"Ссылка: {link} | Элемент: ul.common-data (статистика) | Результат: Данные не извлечены (нет чисел или меток), возвращаем 'Нет данных'")
-                    self.data.append((link, ['0'], ['Нет данных']))
+                    print(f"Ссылка: {link} | Дата: {date_range} | Элемент: ul.common-data (статистика) | Результат: Данные не извлечены (нет чисел или меток), возвращаем 'Нет данных'")
+                    self.data.append((link, ['0'], ['Нет данных'], date_range))
                 else:
-                    # Синхронизируем числа и метки (если меток больше, чем чисел, оставляем лишние метки как None)
+                    # Синхронизируем числа и метки
                     min_length = min(len(numbers), len(labels))
                     numbers = numbers[:min_length]
                     labels = labels[:min_length]
-                    print(f"Ссылка: {link} | Элемент: ul.common-data (статистика) | Результат: Данные извлечены - Числа: {numbers}, Метки: {labels}")
-                    self.data.append((link, numbers, labels))
+                    print(f"Ссылка: {link} | Дата: {date_range} | Элемент: ul.common-data (статистика) | Результат: Данные извлечены - Числа: {numbers}, Метки: {labels}")
+                    self.data.append((link, numbers, labels, date_range))
 
         except Exception as e:
-            print(f"Ссылка: {link} | Элемент: Неизвестно | Результат: Ошибка: {str(e)}")
-            self.data.append((link, ['0'], ['Нет данных']))
+            print(f"Ссылка: {link} | Дата: {date_range} | Элемент: Неизвестно | Результат: Ошибка: {str(e)}")
+            self.data.append((link, ['0'], ['Нет данных'], date_range))
             self.driver.refresh()
 
     def process_data(self):
-        """Обработка всех ссылок с фиксированным диапазоном дат"""
-        for i, link in enumerate(self.links, 1):
-            self.parser(link)
-            remaining = len(self.links) - i
-            print(f"Обработана страница {link}. Осталось: {remaining} ссылок.")
+        """Обработка всех ссылок с фиксированными диапазонами дат"""
+        total_iterations = len(self.links) * len(self.date_ranges)
+        iteration = 0
+        for link in self.links:
+            for date_range in self.date_ranges:
+                iteration += 1
+                self.parser(link, date_range)
+                remaining = total_iterations - iteration
+                print(f"Обработана страница {link} для диапазона {date_range}. Осталось: {remaining} итераций.")
 
     def clean_data(self):
         """Очистка и форматирование извлечённых данных"""
@@ -219,13 +230,13 @@ class SocialMediaParser:
         }
 
         data = []
-        for link, numbers, labels in self.data:
-            row_data = {'Ссылка': link}
-            print(f"Обработка данных для ссылки: {link}")
+        for link, numbers, labels, date_range in self.data:
+            row_data = {'Ссылка': link, 'Диапазон дат': date_range}
+            print(f"Обработка данных для ссылки: {link} | Диапазон: {date_range}")
             print(f"Исходные метки: {labels}, Числа: {numbers}")
 
             if labels[0] == 'Нет данных':
-                print(f"Ссылка: {link} | Результат: Нет данных, все метрики = 0")
+                print(f"Ссылка: {link} | Диапазон: {date_range} | Результат: Нет данных, все метрики = 0")
                 for metric in ['Подписчики', 'Лайки', 'Репосты', 'Комментарии', 'Просмотры', 'Публикации']:
                     row_data[metric] = 0
             else:
@@ -234,15 +245,15 @@ class SocialMediaParser:
                     if label in label_mapping:
                         mapped_label = label_mapping[label]
                         row_data[mapped_label] = int(num)
-                        print(f"Ссылка: {link} | Метка: {label} → {mapped_label} | Значение: {num}")
+                        print(f"Ссылка: {link} | Диапазон: {date_range} | Метка: {label} → {mapped_label} | Значение: {num}")
                     else:
-                        print(f"Ссылка: {link} | Метка: {label} | Результат: Метка игнорируется")
+                        print(f"Ссылка: {link} | Диапазон: {date_range} | Метка: {label} | Результат: Метка игнорируется")
 
                 # Заполняем недостающие метрики нулями
                 for metric in ['Подписчики', 'Лайки', 'Репосты', 'Комментарии', 'Просмотры', 'Публикации']:
                     if metric not in row_data:
                         row_data[metric] = 0
-                        print(f"Ссылка: {link} | Метка: {metric} | Результат: Не найдена, установлено значение 0")
+                        print(f"Ссылка: {link} | Диапазон: {date_range} | Метка: {metric} | Результат: Не найдена, установлено значение 0")
 
             data.append(row_data)
 
@@ -257,15 +268,23 @@ class SocialMediaParser:
         print("Фильтрация исходного DataFrame, оставлены только поддерживаемые платформы:")
         print(result_df)
 
+        # Добавляем столбец с диапазоном дат
+        parsed_df['key'] = parsed_df['Ссылка'] + '_' + parsed_df['Диапазон дат']
+        result_df['key'] = result_df['Ссылка'] + '_' + result_df.apply(lambda x: self.date_ranges[0] if self.date_ranges else '', axis=1)
+
         # Обновляем значения только для спарсенных ссылок
         for metric in ['Подписчики', 'Лайки', 'Репосты', 'Комментарии', 'Просмотры', 'Публикации']:
             if metric in parsed_df.columns:
-                metric_dict = parsed_df.set_index('Ссылка')[metric].to_dict()
-                result_df[metric] = result_df['Ссылка'].map(metric_dict).fillna(result_df[metric]).astype(int)
+                metric_dict = parsed_df.set_index('key')[metric].to_dict()
+                result_df[metric] = result_df['key'].map(metric_dict).fillna(result_df[metric]).astype(int)
                 print(f"Обновление столбца {metric} в итоговом DataFrame:")
                 print(result_df[['Ссылка', metric]])
             else:
                 print(f"Столбец {metric} отсутствует в parsed_df, все значения остаются 0")
+
+        # Добавляем столбец с диапазоном дат в итоговый DataFrame
+        result_df['Диапазон дат'] = result_df['key'].map(parsed_df.set_index('key')['Диапазон дат'])
+        result_df = result_df.drop(columns=['key'])
 
         return result_df
 
@@ -292,9 +311,13 @@ class SocialMediaParser:
             title='Парсер готов'
         )
 
+        # Ожидание ввода перед закрытием браузера
+        input("Нажмите Enter, чтобы продолжить...")
+
     def __del__(self):
         """Очистка ресурсов"""
-        if self.driver:
+        # Проверка на существование атрибута driver перед вызовом quit()
+        if hasattr(self, 'driver') and self.driver:
             self.driver.quit()
 
 def main():
